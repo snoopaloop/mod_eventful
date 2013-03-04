@@ -166,6 +166,7 @@ send_data(Event, Data, State) ->
 %%--------------------------------------------------------------------
 init([Host, _Opts]) ->
     inets:start(),
+    ssl:start(),
     ejabberd_hooks:add(user_send_packet,    Host, ?MODULE, send_message,       50),
     ejabberd_hooks:add(set_presence_hook,   Host, ?MODULE, set_presence_log,   50),
     ejabberd_hooks:add(unset_presence_hook, Host, ?MODULE, unset_presence_log, 50),
