@@ -1,1 +1,1 @@
-{'src/mod_eventful', [{outdir, "/Applications/ejabberd-2.1.11/lib/ejabberd-2.1.11/ebin"},{i,"../../ejabberd-dev/trunk/include"},{i,"../../ejabberd-dev/trunk/include/web"}]}.
+{'src/web/mod_eventful', [{outdir, "ebin"},{i,"/usr/lib64/ejabberd/include"},{i,"/usr/lib64/ejabberd/include/web"}]}.
