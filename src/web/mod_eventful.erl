@@ -49,7 +49,9 @@
 %% Event handlers
 %%====================================================================
 
+%% every messages ever
 send_message(From, To, P) ->
+    %?INFO_MSG("send message from: ~p~n to: ~p~n Msg:~p~n", [From, To, P]),
     case parse_message(From, To, P) of
         ignore -> 
             ok;
@@ -58,18 +60,36 @@ send_message(From, To, P) ->
             ok
     end.
 
+%% Resource: 
+%%   <<"bender">>
+%% Presence: 
+%%   {xmlel,<<"presence">>,[{<<"xml:lang">>,<<>>}],[
+%%     {xmlel,<<"c">>,[{<<"xmlns">>,<<"http://jabber.org/protocol/caps">>},{<<"node">>,<<"http://pidgin.im/">>},{<<"hash">>,<<"sha-1">>},{<<"ver">>,<<"VUFD6HcFmUT2NxJkBGCiKlZnS3M=">>}],[]},
+%%     {xmlel,<<"x">>,[{<<"xmlns">>,<<"vcard-temp:x:update">>}],[]}
+%%   ]}
 set_presence_log(User, Server, Resource, Presence) ->
-    post_results(set_presence_hook, User, Server, Resource, lists:flatten(xml:element_to_string(Presence))),
+    %?INFO_MSG("Resource: ~p~nPresence: ~p~n", [Resource, xml:element_to_string(Presence)]),
+    Show = binary_to_list(get_tag_from(<<"show">>, Presence, <<"available">>)),
+    Status = binary_to_list(get_tag_from(<<"status">>, Presence)),
+
+    %% add as parameters
+    M = lists:flatten(["&show=", url_encode(Show), "&status=", url_encode(Status)]),
+    post_results(set_presence_hook, User, Server, Resource, M),
     case ejabberd_sm:get_user_resources(User,Server) of
         [_] ->        
             %%% First connection, so user has just come online
-            post_results(online_hook, User, Server, Resource, lists:flatten(xml:element_to_string(Presence)));
+            post_results(online_hook, User, Server, Resource, M);
         _ ->
             false
     end,
     ok.
 
+%% Resource: 
+%%   <<"bender">>
+%% Status: 
+%%   []
 unset_presence_log(User, Server, Resource, Status) ->
+    %?INFO_MSG("Resource: ~p~nStatus: ~n~p", [Resource, Status]),
     post_results(unset_presence_hook, User, Server, Resource, Status),
     case ejabberd_sm:get_user_resources(User,Server) of
         [] ->
@@ -105,23 +125,31 @@ url_for(Event, Urls) ->
     
 % parse a message and return the body string if successful
 % return ignore if the message should not be stored
-parse_message(From, To, {xmlelement, "message", _, _} = Packet) ->
-    Type    = xml:get_tag_attr_s("type", Packet),
-    Subject = get_tag_from("subject", Packet),
-    Body    = get_tag_from("body", Packet),
-    Thread  = get_tag_from("thread", Packet),
+%% we want to ignore all but: #xmlel{name = <<"message">>})
+parse_message(From, To, #xmlel{ name = <<"message">> } = Packet) ->
+    %?INFO_MSG("Message packet: ~p~n", [Packet]),
+    Type    = binary_to_list(xml:get_tag_attr_s(<<"type">>, Packet)),
+    Subject = binary_to_list(get_tag_from(<<"subject">>, Packet)),
+    Body    = binary_to_list(get_tag_from(<<"body">>, Packet)),
+    Thread  = binary_to_list(get_tag_from(<<"thread">>, Packet)),
     case Body == "" of
         true ->
             ignore;
         false ->
-            #message{from = jlib:jid_to_string(From), to = jlib:jid_to_string(To), type = Type, subject = Subject, body = Body, thread = Thread}
+            #message{
+                from = binary_to_list(jlib:jid_to_binary(From)), 
+                to = binary_to_list(jlib:jid_to_binary(To)), 
+                type = Type, subject = Subject, body = Body, thread = Thread}
     end;
 parse_message(_From, _To, _) -> ignore.
 
 get_tag_from(Tag, Packet) ->
+    get_tag_from(Tag, Packet, <<"">>).
+
+get_tag_from(Tag, Packet, Default) ->
     case xml:get_subtag(Packet, Tag) of
         false -> 
-            "";
+            Default;
         Xml   ->
             xml:get_tag_cdata(Xml)
     end.
@@ -185,19 +213,21 @@ init([Host, _Opts]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call({post_results, message_hook, Message}, _From, State) ->
-    Data = "from="     ++ ejabberd_http:url_encode(Message#message.from) ++
-           "&to="      ++ ejabberd_http:url_encode(Message#message.to) ++
-           "&type="    ++ ejabberd_http:url_encode(Message#message.type) ++ 
-           "&subject=" ++ ejabberd_http:url_encode(Message#message.subject) ++
-           "&body="    ++ ejabberd_http:url_encode(Message#message.body) ++
-           "&thread="  ++ ejabberd_http:url_encode(Message#message.thread),
+    %?INFO_MSG("post_results message:~n  ~p~n", [Message]),
+    Data = "from="     ++ url_encode(Message#message.from) ++
+           "&to="      ++ url_encode(Message#message.to) ++
+           "&type="    ++ url_encode(Message#message.type) ++ 
+           "&subject=" ++ url_encode(Message#message.subject) ++
+           "&body="    ++ url_encode(Message#message.body) ++
+           "&thread="  ++ url_encode(Message#message.thread),
     send_data(message_hook, Data, State),
     {reply, ok, State};
 handle_call({post_results, Event, User, Server, Resource, Message}, _From, State) ->
-    Data = "user="      ++ ejabberd_http:url_encode(User) ++
-           "&server="   ++ ejabberd_http:url_encode(Server) ++
-           "&resource=" ++ ejabberd_http:url_encode(Resource) ++ 
-           "&message="  ++ ejabberd_http:url_encode(Message),
+    %?INFO_MSG("post_results, not message - ~nuser: ~p~nserver: ~p~nresource: ~p~nmessage: ~p~n", [User, Server, Resource, Message]),
+    Data = "user="      ++ url_encode(User) ++
+           "&server="   ++ url_encode(Server) ++
+           "&resource=" ++ url_encode(Resource) ++ 
+           "&message="  ++ url_encode(Message),
     send_data(Event, Data, State),
     {reply, ok, State};
 handle_call(stop, _From, State) ->
@@ -281,3 +311,48 @@ stop(Host) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
     gen_server:call(Proc, stop),
     supervisor:delete_child(ejabberd_sup, Proc).
+
+%%====================================================================
+%% internal functions
+%%====================================================================
+
+%% url_encode from ejabberd_http
+url_encode(V) when is_binary(V) ->
+    url_encode(binary_to_list(V));
+url_encode([H|T]) ->
+    if
+    H >= $a, $z >= H ->
+        [H|url_encode(T)];
+    H >= $A, $Z >= H ->
+        [H|url_encode(T)];
+    H >= $0, $9 >= H ->
+        [H|url_encode(T)];
+    H == $_; H == $.; H == $-; H == $/; H == $: -> % FIXME: more..
+        [H|url_encode(T)];
+    true ->
+        case integer_to_hex(H) of
+        [X, Y] ->
+            [$%, X, Y | url_encode(T)];
+        [X] ->
+            [$%, $0, X | url_encode(T)]
+        end
+    end;
+
+url_encode([]) ->
+    [].
+
+integer_to_hex(I) ->
+    case catch erlang:integer_to_list(I, 16) of
+    {'EXIT', _} ->
+        old_integer_to_hex(I);
+    Int ->
+        Int
+    end.
+
+old_integer_to_hex(I) when I<10 ->
+    integer_to_list(I);
+old_integer_to_hex(I) when I<16 ->
+    [I-10+$A];
+old_integer_to_hex(I) when I>=16 ->
+    N = trunc(I/16),
+    old_integer_to_hex(N) ++ old_integer_to_hex(I rem 16).
