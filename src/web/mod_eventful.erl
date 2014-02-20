@@ -162,7 +162,7 @@ send_data(Event, Data, State) ->
     case is_list(AuthUser) andalso is_list(AuthPassword) of
         true  -> 
             UserPassword = base64:encode_to_string(AuthUser ++ ":" ++ AuthPassword),
-            Headers      = [{"Authorization", "Basic " ++ UserPassword}];
+            Headers = [{"Authorization", "Basic " ++ UserPassword}];
         false ->
             Headers = []
     end,
@@ -179,7 +179,7 @@ send_data(Event, Data, State) ->
                 [{sync, false},{stream, self}]
             );
         false ->
-            false
+            {error, io_lib:format("URL ~p is not a list", [Url])}
     end.
     
 %%====================================================================
@@ -220,7 +220,12 @@ handle_call({post_results, message_hook, Message}, _From, State) ->
            "&subject=" ++ url_encode(Message#message.subject) ++
            "&body="    ++ url_encode(Message#message.body) ++
            "&thread="  ++ url_encode(Message#message.thread),
-    send_data(message_hook, Data, State),
+    case send_data(message_hook, Data, State) of
+        {ok, _} ->
+            ok;
+        {error, Reason} ->
+            ?ERROR_MSG("Failed to send data: ~p", [Reason])
+    end,
     {reply, ok, State};
 handle_call({post_results, Event, User, Server, Resource, Message}, _From, State) ->
     %?INFO_MSG("post_results, not message - ~nuser: ~p~nserver: ~p~nresource: ~p~nmessage: ~p~n", [User, Server, Resource, Message]),
@@ -228,7 +233,12 @@ handle_call({post_results, Event, User, Server, Resource, Message}, _From, State
            "&server="   ++ url_encode(Server) ++
            "&resource=" ++ url_encode(Resource) ++ 
            "&message="  ++ url_encode(Message),
-    send_data(Event, Data, State),
+    case send_data(Event, Data, State) of
+        {ok, _} ->
+            ok;
+        {error, Reason} ->
+            ?ERROR_MSG("Failed to send data: ~p", [Reason])
+    end,
     {reply, ok, State};
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State}.
